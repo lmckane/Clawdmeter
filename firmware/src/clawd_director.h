@@ -38,6 +38,10 @@ bool director_take_dismissed(void);         // an alert ended on the device sinc
 // tapping the aquarium: the face comes up, curious, for a while (a tap on it
 // sends it back); anywhere else it means "show me the meters".
 void director_tap(int x);
+// Temporary touch overlays (such as device settings) consume panel taps.
+// The director listens at the input-device level, outside LVGL object event
+// bubbling, so an overlay must explicitly block its aquarium reaction.
+void director_set_touch_blocked(bool blocked);
 // While on, the panel is the pairing control (the touch-hold re-pair on
 // boards without a PWR button): a tap on the meters still counts as you
 // being here and dismisses an alert, but Clawd doesn't peek, so the hint

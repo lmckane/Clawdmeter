@@ -124,6 +124,15 @@ written to the event log.
 Usage meters work without hooks. Use **Send a test alert** to check the
 app-to-device alert path; it does not test whether Claude Code invoked a hook.
 
+For a Codex account, the same Hooks page can install four commands in that
+account's `hooks.json`: prompt submission, tool completion, permission request,
+and turn completion. They invoke the Clawdmeter app's `codex-hook` command;
+prompt text and tool input are not stored in Clawdmeter's event log. Codex
+requires you to review and trust new or changed hooks in its own hook review
+screen before they run. A Codex permission request can raise a Clawdmeter
+alert, while prompt, tool, and stop events feed Clawd's activity reactions.
+Other Codex hooks in the file are preserved when installing or removing these.
+
 ## Start at login
 
 Enable **Settings → Start at login** to launch the tray app when you sign in.

@@ -37,13 +37,17 @@ use super::{command, live_status, not_running_text, run_blocking, Navigate, REFR
 use crate::boards::{self, BoardInfo};
 use crate::diff::{line_diff, with_context, DiffLine};
 use crate::errors;
-use crate::hooks::install::{self as hooks, HookPlan, HookStatus, HOOKS};
+use crate::hooks::{
+    codex as codex_hooks,
+    install::{self as hooks, HookPlan, HookStatus, HOOKS},
+};
 use crate::ipc::{self, AppCommand, FirmwareRecord, StatusSnapshot};
 use crate::tilde;
 use crate::Page;
 
 struct HookRow {
     dir: PathBuf,
+    codex: bool,
     status: HookStatus,
 }
 
@@ -299,11 +303,20 @@ impl SettingsView {
             .iter()
             .map(|d| HookRow {
                 dir: d.clone(),
+                codex: false,
                 status: match &self.hook_exe {
                     Some(exe) => hooks::dir_status(d, exe),
                     None => HookStatus::Unreadable("Couldn't locate the Clawdmeter executable.".into()),
                 },
             })
+            .chain(self.settings.codex_dirs.iter().map(|d| HookRow {
+                dir: d.clone(),
+                codex: true,
+                status: match &self.hook_exe {
+                    Some(exe) => codex_hooks::dir_status(d, exe),
+                    None => HookStatus::Unreadable("Couldn't locate the Clawdmeter executable.".into()),
+                },
+            }))
             .collect();
         self.autostart_on = autostart::is_enabled(&self.paths.home, LaunchMode::Tray);
         self.autostart_stale = self
@@ -473,15 +486,21 @@ impl SettingsView {
         };
         let mut plans = Vec::new();
         for d in dirs {
-            let plan = match action {
-                HookAction::Install => hooks::plan_install(&d, &exe),
-                HookAction::Remove => hooks::plan_uninstall(&d),
+            let codex = self.settings.codex_dirs.contains(&d);
+            let plan = match (action, codex) {
+                (HookAction::Install, false) => hooks::plan_install(&d, &exe),
+                (HookAction::Remove, false) => hooks::plan_uninstall(&d),
+                (HookAction::Install, true) => hooks::plan_codex_install(&d, &exe),
+                (HookAction::Remove, true) => hooks::plan_codex_uninstall(&d),
             };
             match plan {
                 Ok(p) if p.changes() => plans.push(p),
                 Ok(_) => {}
                 Err(e) => {
-                    let f = tilde(&d.join("settings.json").display().to_string(), &self.paths.home);
+                    let f = tilde(
+                        &d.join(if codex { "hooks.json" } else { "settings.json" }).display().to_string(),
+                        &self.paths.home,
+                    );
                     self.hook_msg = Some((Tone::Bad, format!("{f}: {e}")));
                     return;
                 }
@@ -517,10 +536,10 @@ impl SettingsView {
             Tone::Ok,
             match p.action {
                 HookAction::Install => {
-                    format!("Hooks installed in {accounts}. Your original settings are kept in settings.json.bak.")
+                    format!("Hooks installed in {accounts}. Original hook files are kept as .json.bak backups.")
                 }
                 HookAction::Remove => {
-                    format!("Hooks removed from {accounts}. Your original settings are kept in settings.json.bak.")
+                    format!("Hooks removed from {accounts}. Original hook files are kept as .json.bak backups.")
                 }
             },
         ));
@@ -1574,9 +1593,8 @@ impl SettingsView {
         let mut pane = div().flex().flex_col().gap(px(14.)).when(!self.embedded, |d| {
             d.child(heading(t, "Hooks")).child(para(
                 t,
-                "Hooks let Clawd react to activity and show alerts. The event log stores timestamps, event types, \
-                 and session IDs. Alerts also store notification or question text for the device. Usage meters work \
-                 without hooks.",
+                "Claude Code and Codex hooks let Clawd react to activity and show alerts. The event log stores \
+                 timestamps, event types, and session IDs. Usage meters work without hooks.",
             ))
         });
         let busy = self.preview.is_some();
@@ -1587,7 +1605,7 @@ impl SettingsView {
         for (i, row) in self.hooks.iter().enumerate() {
             let (meta, chip, action): (String, (&str, Tone), Option<(&str, HookAction)>) = match &row.status {
                 HookStatus::Installed => (
-                    format!("{} hooks installed", HOOKS.len()),
+                    format!("{} hooks installed", if row.codex { codex_hooks::EVENTS.len() } else { HOOKS.len() }),
                     ("Installed", Tone::Ok),
                     Some(("Review removal", HookAction::Remove)),
                 ),
@@ -1597,8 +1615,18 @@ impl SettingsView {
                     Some(("Review install", HookAction::Install)),
                 ),
                 HookStatus::Legacy => (
-                    "Uses attention-hook.sh. Update to the built-in Clawdmeter hooks.".into(),
+                    if row.codex {
+                        "Uses the temporary Python bridge. Update to the built-in Clawdmeter hooks."
+                    } else {
+                        "Uses attention-hook.sh. Update to the built-in Clawdmeter hooks."
+                    }
+                    .into(),
                     ("Legacy hooks", Tone::Warn),
+                    Some(("Review update", HookAction::Install)),
+                ),
+                HookStatus::Stale(old) if row.codex => (
+                    format!("Uses another Codex hook command: {old}"),
+                    ("Out of date", Tone::Warn),
                     Some(("Review update", HookAction::Install)),
                 ),
                 HookStatus::Stale(old) => (
@@ -1633,13 +1661,10 @@ impl SettingsView {
                         .flex_1()
                         .min_w_0()
                         .gap(px(3.))
-                        .child(
-                            div()
-                                .font_family(FONT_MONO)
-                                .text_size(px(13.))
-                                .truncate()
-                                .child(tilde(&row.dir.join("settings.json").display().to_string(), &self.paths.home)),
-                        )
+                        .child(div().font_family(FONT_MONO).text_size(px(13.)).truncate().child(tilde(
+                            &row.dir.join(if row.codex { "hooks.json" } else { "settings.json" }).display().to_string(),
+                            &self.paths.home,
+                        )))
                         .child(div().text_size(px(12.5)).text_color(t.mute).child(meta)),
                 )
                 .child(pill(t, chip.0, chip.1));
@@ -1699,7 +1724,7 @@ impl SettingsView {
                     })),
             );
             pane =
-                pane.child(caption(t, "Review before applying. Your original settings are kept in settings.json.bak."));
+                pane.child(caption(t, "Review before applying. The first version of each changed file is kept as a .json.bak backup. Codex also asks you to trust new hooks before running them."));
             for plan in &p.plans {
                 // Diff what changes, not how the file was formatted: compare
                 // against the old file pretty-printed the way it will be saved.
@@ -1781,7 +1806,9 @@ impl SettingsView {
     fn alert_kinds(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         type Pick = fn(&mut AlertOn) -> &mut bool;
         let rows: [(&'static str, &'static str, &'static str, Pick); 4] = [
-            ("alert-permission", "Tool approvals", "Claude needs permission to run a tool.", |a| &mut a.permission),
+            ("alert-permission", "Tool approvals", "Claude or Codex needs permission to run a tool.", |a| {
+                &mut a.permission
+            }),
             ("alert-question", "Questions", "Claude has a question for you.", |a| &mut a.question),
             ("alert-idle", "Idle sessions", "Claude has been waiting for your next prompt.", |a| &mut a.idle),
             ("alert-elicitation", "MCP requests", "An MCP server needs information from you.", |a| &mut a.elicitation),
@@ -2630,6 +2657,39 @@ mod tests {
             assert_eq!(v.hooks[0].status, HookStatus::Installed);
             assert!(v.preview.is_none());
         });
+        let _ = std::fs::remove_dir_all(&paths.home);
+    }
+
+    #[gpui::test]
+    fn codex_hooks_migrate_from_bridge_after_preview(cx: &mut TestAppContext) {
+        let paths = home("codex-hooks");
+        let codex_dir = paths.home.join("codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        std::fs::write(
+            &paths.config_file,
+            format!("config_dirs = {}\ncodex_dirs = {}\n", paths.home.join("acct").display(), codex_dir.display()),
+        )
+        .unwrap();
+        let file = codex_dir.join("hooks.json");
+        let before = r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/usr/bin/python3 /tmp/codex_clawdmeter_hook.py Stop"},{"type":"command","command":"my-stop-hook"}]}]}}"#;
+        std::fs::write(&file, before).unwrap();
+        let p = paths.clone();
+        let (view, cx) = cx.add_window_view(move |_, cx| SettingsView::with_usb(p, Page::Hooks, false, cx));
+        view.read_with(cx, |v, _| {
+            assert_eq!(v.hooks.len(), 2);
+            assert!(v.hooks[1].codex);
+            assert_eq!(v.hooks[1].status, HookStatus::Legacy);
+        });
+
+        click(cx, "hook-1");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+        click(cx, "apply-hooks");
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert!(after.contains(" codex-hook UserPromptSubmit"), "{after}");
+        assert!(after.contains("my-stop-hook"), "{after}");
+        assert!(!after.contains("codex_clawdmeter_hook.py"), "{after}");
+        assert_eq!(std::fs::read_to_string(file.with_extension("json.bak")).unwrap(), before);
+        view.read_with(cx, |v, _| assert_eq!(v.hooks[1].status, HookStatus::Installed));
         let _ = std::fs::remove_dir_all(&paths.home);
     }
 

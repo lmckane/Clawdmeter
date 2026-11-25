@@ -32,6 +32,10 @@
 #include "hal/imu_hal.h"
 #include "hal/sound_hal.h"
 #include "hal/board_info_hal.h"
+#ifdef CLAWD_C6_SETTINGS
+#include "boards/waveshare_amoled_216_c6/settings.h"
+#include "boards/waveshare_amoled_216_c6/wifi_setup.h"
+#endif
 
 static UsageData usage = {};
 
@@ -313,6 +317,9 @@ void setup() {
     ui_update_ble_status(ble_get_state(), ble_get_device_name(), ble_get_mac_address());
     ui_update_battery(power_hal_battery_pct(), power_hal_is_charging(), power_hal_is_vbus_in());
     director_init();    // rooms + beats; boots on the meters (home)
+#ifdef CLAWD_C6_SETTINGS
+    c6_wifi_init();
+#endif
     clawd_prefs_init();  // the saved device settings, before the app says otherwise
 
     Serial.printf("Dashboard ready (%s, %dx%d) %lu ms after boot, waiting for data on BLE...\n",
@@ -468,6 +475,11 @@ void loop() {
     ble_tick();
     power_hal_tick();
     imu_hal_tick();
+#ifdef CLAWD_C6_SETTINGS
+    if (!idle_is_asleep() && imu_hal_take_shake()) c6_settings_toggle();
+    c6_settings_tick();
+    c6_wifi_tick();
+#endif
     sound_hal_tick();
     performer_tick();
     mascot_tick();

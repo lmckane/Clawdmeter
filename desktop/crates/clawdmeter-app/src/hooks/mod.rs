@@ -18,6 +18,7 @@
 //! exits 0. The file formats match the legacy `attention-hook.sh` byte for
 //! byte apart from the alert's `k`, which older readers ignore.
 
+pub mod codex;
 pub mod install;
 
 use std::fs::{self, File, OpenOptions};

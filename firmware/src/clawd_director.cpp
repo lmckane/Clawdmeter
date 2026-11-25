@@ -73,6 +73,7 @@ static ClawdRng    rng;
 static int         peek_x = 0;                // where the peek's tap landed
 static uint32_t    peek_up_at = 0;            // the peek's face started rising
 static lv_indev_t* touch_indev = NULL;
+static bool        touch_blocked = false;
 
 static uint32_t now_ms(void) { return millis(); }
 
@@ -295,10 +296,13 @@ void director_set_liveliness(int level) {
 
 static void indev_cb(lv_event_t* e) {
     (void)e;
+    if (touch_blocked) return;
     lv_point_t p = { 0, 0 };
     if (touch_indev) lv_indev_get_point(touch_indev, &p);
     director_tap(p.x);
 }
+
+void director_set_touch_blocked(bool blocked) { touch_blocked = blocked; }
 
 void director_on_payload(const UsageData* d, const SignalsUpdate* sig) {
     if (!d->valid || !d->ok) return;

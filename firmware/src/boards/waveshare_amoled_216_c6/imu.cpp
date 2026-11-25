@@ -22,6 +22,13 @@ static uint32_t candidate_since    = 0;
 static uint32_t last_poll_ms       = 0;
 static bool     imu_ok             = false;
 static float    accel_scale        = 0;      // g per LSB, set by configAccel()
+static float    prev_ax = 0, prev_ay = 0, prev_az = 0;
+static bool     have_prev = false;
+static bool     shake_pending = false;
+static uint8_t  shake_peaks = 0;
+static uint32_t shake_window_ms = 0;
+static uint32_t shake_last_peak_ms = 0;
+static uint32_t shake_cooldown_ms = 0;
 
 // Dead zone: the dominant axis must beat the other by 25 % before we commit,
 // otherwise (near 45°, e.g. a tilted stand) the current quadrant is kept.
@@ -78,6 +85,27 @@ void imu_hal_tick(void) {
     if (!imu.readAccelRaw(rx, ry, rz)) return;
     float ax = rx * accel_scale;  // g
     float ay = ry * accel_scale;
+    float az = rz * accel_scale;
+
+    // Three separate acceleration jolts in a short window distinguish an
+    // intentional shake from a single pickup or orientation change. Space
+    // peaks apart so a noisy sensor burst cannot count as three jolts.
+    if (have_prev) {
+        const float jerk = fabsf(ax - prev_ax) + fabsf(ay - prev_ay) + fabsf(az - prev_az);
+        if (now - shake_window_ms > 900) shake_peaks = 0;
+        if (jerk > 1.25f && now - shake_last_peak_ms >= 150 &&
+            now - shake_cooldown_ms > 2500) {
+            shake_last_peak_ms = now;
+            if (shake_peaks == 0) shake_window_ms = now;
+            if (++shake_peaks >= 3) {
+                shake_pending = true;
+                shake_peaks = 0;
+                shake_cooldown_ms = now;
+            }
+        }
+    }
+    prev_ax = ax; prev_ay = ay; prev_az = az;
+    have_prev = true;
 
     uint8_t target = accel_to_rotation(ax, ay);
     if (target == 255 || target == current_rotation) {
@@ -94,3 +122,9 @@ void imu_hal_tick(void) {
 }
 
 uint8_t imu_hal_rotation_quadrant(void) { return current_rotation; }
+
+bool imu_hal_take_shake(void) {
+    const bool pending = shake_pending;
+    shake_pending = false;
+    return pending;
+}

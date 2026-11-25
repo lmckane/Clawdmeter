@@ -9,3 +9,9 @@
 void    imu_hal_init(void);
 void    imu_hal_tick(void);
 uint8_t imu_hal_rotation_quadrant(void);
+
+// C6 AMOLED-2.16 only: returns one latched, deliberate shake gesture.
+// Other boards do not call this until their own gesture support is added.
+#ifdef CLAWD_C6_SETTINGS
+bool    imu_hal_take_shake(void);
+#endif

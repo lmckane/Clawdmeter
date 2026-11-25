@@ -32,6 +32,10 @@ OPTIONS:
     --info PORT       Ask the firmware on PORT for its env/version
     hook MODE [event] Claude Code hook (MODE: alert, clear or event); reads the
                       hook JSON on stdin, prints nothing, always exits 0
+    codex-hook EVENT  Codex hook (UserPromptSubmit, PostToolUse,
+                      PermissionRequest or Stop); reads JSON on stdin
+    codex-hooks install|remove
+                      Install or remove Codex hooks for configured accounts
     -V, --version
     -h, --help
 
@@ -59,6 +63,38 @@ fn main() {
     // GPUI, no tray; read stdin, write a file, exit 0.
     if args.first().map(String::as_str) == Some("hook") {
         std::process::exit(clawdmeter_app::hooks::main(&args[1..]));
+    }
+    if args.first().map(String::as_str) == Some("codex-hook") {
+        std::process::exit(clawdmeter_app::hooks::codex::main(args.get(1).map(String::as_str)));
+    }
+    if args.first().map(String::as_str) == Some("codex-hooks") {
+        let paths = Paths::for_user();
+        let settings = match clawdmeter_core::Settings::load(&paths) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Couldn't load Clawdmeter settings: {e}");
+                std::process::exit(1);
+            }
+        };
+        let exe = std::env::current_exe().expect("current executable");
+        let op = args.get(1).map(String::as_str);
+        if !matches!(op, Some("install" | "remove")) || settings.codex_dirs.is_empty() {
+            eprintln!("Usage: clawdmeter codex-hooks install|remove (configure a Codex account first)");
+            std::process::exit(2);
+        }
+        for dir in &settings.codex_dirs {
+            let plan = match op {
+                Some("install") => clawdmeter_app::hooks::install::plan_codex_install(dir, &exe),
+                Some("remove") => clawdmeter_app::hooks::install::plan_codex_uninstall(dir),
+                _ => unreachable!(),
+            };
+            if let Err(e) = plan.and_then(|p| p.apply()) {
+                eprintln!("{}: {e}", dir.display());
+                std::process::exit(1);
+            }
+            println!("Updated {}", dir.join("hooks.json").display());
+        }
+        std::process::exit(0);
     }
     let paths = Paths::for_user();
     if args.is_empty() {

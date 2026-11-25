@@ -53,7 +53,7 @@ pub fn hook_command(exe: &Path, args: &str) -> String {
     format!("{} hook {args}", quote_exe(exe))
 }
 
-fn quote_exe(exe: &Path) -> String {
+pub(crate) fn quote_exe(exe: &Path) -> String {
     let p = exe.to_string_lossy();
     if cfg!(windows) {
         return format!("\"{}\"", p.replace('\\', "/"));
@@ -68,7 +68,7 @@ fn quote_exe(exe: &Path) -> String {
 
 /// Split the first shell word off a command (`"a b" rest`, `'a b' rest`,
 /// `a rest`). Returns (word, rest).
-fn first_word(cmd: &str) -> Option<(String, &str)> {
+pub(crate) fn first_word(cmd: &str) -> Option<(String, &str)> {
     let cmd = cmd.trim_start();
     let mut chars = cmd.char_indices();
     let (_, c0) = chars.next()?;
@@ -118,7 +118,7 @@ pub enum Owner {
     Foreign,
 }
 
-fn basename(word: &str) -> String {
+pub(crate) fn basename(word: &str) -> String {
     word.rsplit(['/', '\\']).next().unwrap_or("").to_ascii_lowercase()
 }
 
@@ -394,6 +394,10 @@ pub enum HookOp {
     Install(PathBuf),
     /// Remove them.
     Remove,
+    /// Install Codex hooks in hooks.json.
+    CodexInstall(PathBuf),
+    /// Remove Codex hooks from hooks.json.
+    CodexRemove,
 }
 
 impl HookOp {
@@ -401,6 +405,8 @@ impl HookOp {
         match self {
             HookOp::Install(exe) => merge(text, exe),
             HookOp::Remove => remove(text),
+            HookOp::CodexInstall(exe) => super::codex::merge(text, exe),
+            HookOp::CodexRemove => super::codex::remove(text),
         }
     }
 }
@@ -485,6 +491,24 @@ pub fn plan_uninstall(config_dir: &Path) -> Result<HookPlan, HookError> {
     let path = config_dir.join("settings.json");
     let before = read_opt(&path)?;
     let op = HookOp::Remove;
+    let after = op.run(before.as_deref())?;
+    Ok(HookPlan { path, before, after, op })
+}
+
+/// Plan installing Codex hooks in one account's hooks.json.
+pub fn plan_codex_install(config_dir: &Path, exe: &Path) -> Result<HookPlan, HookError> {
+    let path = super::codex::path(config_dir);
+    let before = read_opt(&path)?;
+    let op = HookOp::CodexInstall(exe.to_owned());
+    let after = op.run(before.as_deref())?;
+    Ok(HookPlan { path, before, after, op })
+}
+
+/// Plan removing only Clawdmeter's Codex hooks.
+pub fn plan_codex_uninstall(config_dir: &Path) -> Result<HookPlan, HookError> {
+    let path = super::codex::path(config_dir);
+    let before = read_opt(&path)?;
+    let op = HookOp::CodexRemove;
     let after = op.run(before.as_deref())?;
     Ok(HookPlan { path, before, after, op })
 }
