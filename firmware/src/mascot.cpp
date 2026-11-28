@@ -87,6 +87,13 @@ static const char* const CORNER_ANIMS[] = {
 static void render(const ClawdAnim* a, uint16_t f, bool mirror, lv_image_dsc_t* d,
                    uint8_t* b, lv_obj_t* o, int c, int px, int feet) {
     if (!a || !b || !o) return;
+#ifdef CLAWD_RGB_REDRAW_GUARD
+    // The RGB LCD scans a PSRAM framebuffer continuously. Redraw the union
+    // of the old and new sprite rectangles on its parent, with a cell of
+    // margin, so a moving/resized sprite cannot leave stale scanlines behind.
+    lv_area_t previous;
+    lv_obj_get_coords(o, &previous);
+#endif
     const int w = a->w * c, h = a->h * c;
     uint16_t* color = (uint16_t*)b;
     uint8_t*  alpha = b + (size_t)w * h * 2;
@@ -112,6 +119,16 @@ static void render(const ClawdAnim* a, uint16_t f, bool mirror, lv_image_dsc_t* 
     lv_image_set_src(o, d);
     lv_obj_set_pos(o, px, feet - h);
     lv_obj_invalidate(o);
+#ifdef CLAWD_RGB_REDRAW_GUARD
+    lv_area_t dirty = {
+        previous.x1 < px ? previous.x1 : px,
+        previous.y1 < feet - h ? previous.y1 : feet - h,
+        previous.x2 > px + w - 1 ? previous.x2 : px + w - 1,
+        previous.y2 > feet - 1 ? previous.y2 : feet - 1,
+    };
+    lv_area_increase(&dirty, c, c);
+    lv_obj_invalidate_area(lv_obj_get_parent(o), &dirty);
+#endif
 }
 
 static void show(lv_obj_t* o, bool on) {

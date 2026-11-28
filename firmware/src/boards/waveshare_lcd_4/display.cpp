@@ -50,7 +50,7 @@ void display_hal_init(void) {
         0 /* pclk_active_neg */, GFX_NOT_DEFINED /* prefer_speed */,
         false /* useBigEndian */,
         0 /* de_idle_high */, 0 /* pclk_idle_high */,
-        LCD_WIDTH * 10 /* bounce_buffer_size_px */);
+        LCD_WIDTH * 20 /* bounce_buffer_size_px: 20 scanlines per DMA buffer */);
     gfx = new Arduino_RGB_Display(
         LCD_WIDTH, LCD_HEIGHT, rgbpanel, 0 /* rotation */,
         true /* auto_flush */,

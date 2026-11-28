@@ -38,6 +38,8 @@ bool director_take_dismissed(void);         // an alert ended on the device sinc
 // tapping the aquarium: the face comes up, curious, for a while (a tap on it
 // sends it back); anywhere else it means "show me the meters".
 void director_tap(int x);
+// On the S3 pet build, an intentional shake requests a full-size pet scene.
+void director_pet_shake(void);
 // Temporary touch overlays (such as device settings) consume panel taps.
 // The director listens at the input-device level, outside LVGL object event
 // bubbling, so an overlay must explicitly block its aquarium reaction.

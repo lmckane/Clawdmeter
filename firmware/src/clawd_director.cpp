@@ -68,6 +68,11 @@ static bool        joy_pending = false;
 static uint32_t    joy_at = 0;
 static bool        minimal = false;
 static ClawdRng    rng;
+#ifdef CLAWD_PET_LIBRARY
+static const char* pet_scene = NULL;
+static bool pet_show_active = false;
+static uint32_t pet_shake_at = 0;
+#endif
 
 // A tap on the meters (the aquarium)
 static int         peek_x = 0;                // where the peek's tap landed
@@ -78,6 +83,12 @@ static bool        touch_blocked = false;
 static uint32_t now_ms(void) { return millis(); }
 
 static void go(Beat b) {
+#ifdef CLAWD_PET_LIBRARY
+    if (beat == B_SHOW && b != B_SHOW) {
+        pet_scene = NULL;
+        pet_show_active = false;
+    }
+#endif
     if (b != beat) Serial.printf("[%lu] director: %s -> %s\n", (unsigned long)now_ms(),
                                  BEAT_NAMES[beat], BEAT_NAMES[b]);
     beat = b;
@@ -136,6 +147,28 @@ static void react(const char* anim, uint8_t times) {
     react_at = now_ms();
     if (beat != B_CORNER) go(B_CORNER);
 }
+
+#ifdef CLAWD_PET_LIBRARY
+static bool request_pet_scene(const char* name) {
+    if (minimal || attention_on || !performer_available() || !ui_meters_live() ||
+        beat != B_HOME || !clawd_anim(name)) return false;
+    pet_scene = name;
+    pet_show_active = true;
+    engage();
+    go(B_SHOW);
+    return true;
+}
+
+void director_pet_shake(void) {
+    const uint32_t now = now_ms();
+    if (pet_shake_at && now - pet_shake_at < 3000) return;
+    pet_shake_at = now;
+    const char* name = clawd_rng_chance(&rng, 50) ? "pet greeting" : "pet coffee";
+    request_pet_scene(name);
+}
+#else
+void director_pet_shake(void) {}
+#endif
 
 // "Show me the meters": the fastest no-cut path from wherever we are.
 static void to_meters(bool noticed) {
@@ -344,9 +377,15 @@ void director_on_payload(const UsageData* d, const SignalsUpdate* sig) {
                 to_meters(true);              // he notices, the face drops
             } else {
                 // Anticipation: he turns and points before anything else.
+#ifdef CLAWD_PET_LIBRARY
+                if (!request_pet_scene("pet thinking"))
+#endif
                 react("pointing", 1);
             }
         } else if (sig->event == 's' && wave) {
+#ifdef CLAWD_PET_LIBRARY
+            if (!request_pet_scene("pet done"))
+#endif
             react("waving", 1);
         }
     }
@@ -355,6 +394,10 @@ void director_on_payload(const UsageData* d, const SignalsUpdate* sig) {
 // ─── Minimal mode ────────────────────────────────────────────────────────────
 static void apply_minimal(bool on) {
     minimal = on;
+#ifdef CLAWD_PET_LIBRARY
+    pet_scene = NULL;
+    pet_show_active = false;
+#endif
     react_anim = NULL;                        // a queued corner reaction is moot now
     resume_screensaver = false;
     face_hide_now();
@@ -401,6 +444,16 @@ static void run_show(uint32_t now) {
         // straight out instead.
         if (mascot_acting()) return;
         show_gate_mark_shown(&show_gate, now);
+#ifdef CLAWD_PET_LIBRARY
+        // A requested pet reaction should answer promptly. The normal
+        // usage-based show keeps its pointing preamble.
+        if (pet_show_active && performer_available()) {
+            mascot_leave(400);
+            step = 2;
+            wait_until = now;
+            return;
+        }
+#endif
         if (mascot_seated())              { mascot_act("pointing", 1); next_step(); }
         else if (performer_available())   { mascot_leave(150); step = 2; wait_until = now; }
         else                              { go(B_HOME); }   // corner-only: he's out, skip it
@@ -426,10 +479,20 @@ static void run_show(uint32_t now) {
         break;
     case 2:  // gone: he walks back on, full size, in front of the meters
         if (!mascot_away()) return;
+#ifdef CLAWD_PET_LIBRARY
+        perform_enter(pet_show_active ? 250 : 150);
+#else
         perform_enter(150);
+#endif
         next_step();
         break;
     case 3:
+#ifdef CLAWD_PET_LIBRARY
+        if (pet_scene) {
+            performer_perform(clawd_anim_index(pet_scene), t.show_scene_ms);
+            pet_scene = NULL;
+        } else
+#endif
         performer_perform_group(g, t.show_scene_ms, false);
         next_step();
         break;
@@ -438,13 +501,21 @@ static void run_show(uint32_t now) {
         next_step();
         break;
     case 5:
+#ifdef CLAWD_PET_LIBRARY
+        performer_walk_off(PERFORMER_LEFT, pet_show_active ? 250 : 150);
+#else
         performer_walk_off(PERFORMER_LEFT, 150);
+#endif
         next_step();
         break;
     case 6:  // off the edge: the corner Clawd comes back in from there
         if (performer_visible()) return;
         performing = false;
+#ifdef CLAWD_PET_LIBRARY
+        mascot_return(-1, pet_show_active ? 250 : 100);
+#else
         mascot_return(-1, 100);
+#endif
         next_step();
         break;
     default:
@@ -682,6 +753,19 @@ void director_tick(void) {
 
 // ─── QA ──────────────────────────────────────────────────────────────────────
 bool director_debug(const char* name) {
+#ifdef CLAWD_PET_LIBRARY
+    if (strncmp(name, "pet ", 4) == 0) {
+        // Bench preview: `clawd pet thinking` (works before BLE data).
+        const char* const scene = name + 4;
+        char full[40];
+        snprintf(full, sizeof(full), "pet %s", scene);
+        if (beat != B_HOME || !performer_available() || !clawd_anim(full)) return false;
+        pet_scene = clawd_anim(full)->name;
+        pet_show_active = true;
+        go(B_SHOW);
+        return true;
+    }
+#endif
     if (strcmp(name, "home") == 0) {
         // "Show me the meters" (a tap anywhere but home, without the peek).
         engage();

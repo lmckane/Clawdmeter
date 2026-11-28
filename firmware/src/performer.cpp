@@ -28,6 +28,16 @@ static bool      shown = false;                // img not hidden
 
 // ─── Mood groups ─────────────────────────────────────────────────────────────
 #define GROUP_COUNT 4
+#ifdef CLAWD_PET_LIBRARY
+#define GROUP_MAX   6
+static const char* const GROUP_NAMES[GROUP_COUNT][GROUP_MAX] = {
+    { "magnifier", "walking", "pointing", "lurking", "pet breathe", "pet look around" },
+    { "crab walking", "waving", "trumpet", "basketball", "pet greeting", "pet coffee" },
+    { "laptop", "dancing", "skateboard", "soccer", "pet thinking", "pet typing" },
+    { "racing car", "cloud", "sailing scene", "jumping happy", "pet done", "pet waiting" },
+};
+static const char* const CALM_NAMES[] = { "magnifier", "walking", "pet breathe", "pet look around", "pet asleep" };
+#else
 #define GROUP_MAX   4
 static const char* const GROUP_NAMES[GROUP_COUNT][GROUP_MAX] = {
     { "magnifier", "walking", "pointing", "lurking" },        // idle / sleepy
@@ -38,6 +48,7 @@ static const char* const GROUP_NAMES[GROUP_COUNT][GROUP_MAX] = {
 // The screensaver's calm dips: gentle Idle-group scenes only (lurking is a
 // corner act and pointing is his "noticing" gesture).
 static const char* const CALM_NAMES[] = { "magnifier", "walking" };
+#endif
 
 // ─── Performer ───────────────────────────────────────────────────────────────
 enum PerfState { P_OFF, P_STAND, P_WALK, P_SCENE, P_CHOREO };
@@ -253,6 +264,14 @@ static void scene_start(const ClawdAnim* a, uint32_t hold) {
     dx = 0;
     facing = +1;
     speed = 100;
+#ifdef CLAWD_PET_LIBRARY
+    // Activity scenes feel more responsive at this pace; the breathing,
+    // look-around, and sleep scenes keep their authored quiet timing.
+    if (strncmp(a->name, "pet ", 4) == 0 &&
+        strcmp(a->name, "pet breathe") != 0 &&
+        strcmp(a->name, "pet look around") != 0 &&
+        strcmp(a->name, "pet asleep") != 0) speed = 135;
+#endif
     loop_hold_ms = hold;
     if (gait_of(a) != GAIT_NONE) {           // walkers do a round trip instead
         pst = P_CHOREO;

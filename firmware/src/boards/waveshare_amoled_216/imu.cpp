@@ -16,6 +16,11 @@ static uint32_t candidate_since    = 0;
 static uint32_t last_poll_ms       = 0;
 static bool     imu_ok             = false;
 static float    accel_scale        = 0;      // g per LSB, set by configAccel()
+static bool     shake_pending      = false;
+static bool     have_prev          = false;
+static float    prev_ax = 0, prev_ay = 0, prev_az = 0;
+static uint8_t  shake_peaks = 0;
+static uint32_t shake_window_ms = 0, shake_last_peak_ms = 0, shake_cooldown_ms = 0;
 
 static uint8_t accel_to_rotation(float ax, float ay) {
     float abs_ax = fabsf(ax);
@@ -67,6 +72,26 @@ void imu_hal_tick(void) {
     if (!imu.readAccelRaw(rx, ry, rz)) return;
     float ax = rx * accel_scale;  // g
     float ay = ry * accel_scale;
+    float az = rz * accel_scale;
+
+    // Three separated jolts within 900 ms avoid mistaking a pickup or
+    // ordinary auto-rotation for a deliberate shake.
+    if (have_prev) {
+        const float jerk = fabsf(ax - prev_ax) + fabsf(ay - prev_ay) + fabsf(az - prev_az);
+        if (now - shake_window_ms > 900) shake_peaks = 0;
+        if (jerk > 1.25f && now - shake_last_peak_ms >= 150 &&
+            now - shake_cooldown_ms > 2500) {
+            shake_last_peak_ms = now;
+            if (shake_peaks == 0) shake_window_ms = now;
+            if (++shake_peaks >= 3) {
+                shake_pending = true;
+                shake_peaks = 0;
+                shake_cooldown_ms = now;
+            }
+        }
+    }
+    prev_ax = ax; prev_ay = ay; prev_az = az;
+    have_prev = true;
 
     uint8_t target = accel_to_rotation(ax, ay);
     if (target == 255 || target == current_rotation) {
@@ -83,3 +108,9 @@ void imu_hal_tick(void) {
 }
 
 uint8_t imu_hal_rotation_quadrant(void) { return current_rotation; }
+
+bool imu_hal_take_shake(void) {
+    const bool pending = shake_pending;
+    shake_pending = false;
+    return pending;
+}

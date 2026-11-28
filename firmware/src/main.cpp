@@ -475,6 +475,10 @@ void loop() {
     ble_tick();
     power_hal_tick();
     imu_hal_tick();
+#ifdef CLAWD_PET_SHAKE
+    const bool pet_shake = imu_hal_take_shake();
+    if (!idle_is_asleep() && pet_shake) director_pet_shake();
+#endif
 #ifdef CLAWD_C6_SETTINGS
     if (!idle_is_asleep() && imu_hal_take_shake()) c6_settings_toggle();
     c6_settings_tick();
